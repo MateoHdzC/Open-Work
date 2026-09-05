@@ -1,0 +1,40 @@
+{
+  "name": "openwork",
+  "version": "1.0.0",
+  "description": "Autonomous Windows AI Desktop Agent & Computer Workspace Environment",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "bin": {
+    "openwork": "dist/bin/openwork.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/bin/openwork.js",
+    "dev": "tsc -w",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "windows",
+    "desktop",
+    "computer-control",
+    "workspace",
+    "openwork"
+  ],
+  "author": "MateoHdzC",
+  "license": "MIT",
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "hono": "^4.6.14",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}
