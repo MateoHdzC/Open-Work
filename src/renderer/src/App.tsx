@@ -6,7 +6,7 @@ import { WorkspaceView } from './components/WorkspaceView';
 import { ActivityView } from './components/ActivityView';
 import { MemoryView } from './components/MemoryView';
 import { SettingsView } from './components/SettingsView';
-import { NavigationTab, ChatMessageUI, ActivityStepUI } from './types';
+import { NavigationTab, ChatMessageUI, ActivityStepUI, ChatSessionSummary } from './types';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('chat');
@@ -16,11 +16,39 @@ export const App: React.FC = () => {
   const [isAgentMode, setIsAgentMode] = useState<boolean>(true);
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('');
   const [activeProvider, setActiveProvider] = useState<string>('openai');
+  const [activeProviderName, setActiveProviderName] = useState<string>('OpenAI');
   const [activeModel, setActiveModel] = useState<string>('gpt-4o');
+  const [hasProviderKey, setHasProviderKey] = useState<boolean>(true);
   const [activityLog, setActivityLog] = useState<ActivityStepUI[]>([]);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  const loadSessions = async () => {
+    if (!(window as any).openwork?.chats) return;
+    try {
+      const list = await (window as any).openwork.chats.list();
+      setSessions(list || []);
+    } catch {}
+  };
+
+  const checkProviderState = async () => {
+    if (!(window as any).openwork?.providers) return;
+    try {
+      const pData = await (window as any).openwork.providers.list();
+      if (pData) {
+        setActiveProvider(pData.activeProviderId);
+        setActiveModel(pData.activeModelId);
+        const p = pData.providers.find((item: any) => item.id === pData.activeProviderId);
+        if (p) {
+          setActiveProviderName(p.name);
+          setHasProviderKey(p.id === 'ollama' || p.hasKey);
+        }
+      }
+    } catch {}
+  };
 
   useEffect(() => {
-    // Initial fetch of settings and workspace
+    // Initial fetch of settings, workspace, sessions and providers
     const init = async () => {
       if (!(window as any).openwork) return;
       try {
@@ -28,12 +56,12 @@ export const App: React.FC = () => {
         if (s) {
           setIsAgentMode(s.isAgentMode ?? true);
           setWorkspaceRoot(s.workspaceRoot || '');
-          setActiveProvider(s.activeProviderId || 'openai');
-          setActiveModel(s.activeModelId || 'gpt-4o');
           if (s.accentColor) {
             document.documentElement.style.setProperty('--accent', s.accentColor);
           }
         }
+        await checkProviderState();
+        await loadSessions();
       } catch {}
     };
     init();
@@ -56,7 +84,6 @@ export const App: React.FC = () => {
           return [...prev, step];
         });
 
-        // Also update the latest assistant message's toolCalls
         setMessages((prev) => {
           if (prev.length === 0) return prev;
           const copy = [...prev];
@@ -107,6 +134,42 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const handleSelectSession = async (id: string) => {
+    try {
+      const sess = await (window as any).openwork.chats.get(id);
+      if (sess) {
+        setActiveSessionId(sess.id);
+        setMessages(sess.messages || []);
+        setCurrentTab('chat');
+      }
+    } catch {}
+  };
+
+  const handleNewChat = () => {
+    setActiveSessionId(null);
+    setMessages([]);
+    setActivityLog([]);
+    setStatus('Idle');
+    setCurrentTab('chat');
+  };
+
+  const handleRenameSession = async (id: string, newTitle: string) => {
+    try {
+      await (window as any).openwork.chats.rename(id, newTitle);
+      await loadSessions();
+    } catch {}
+  };
+
+  const handleDeleteSession = async (id: string) => {
+    try {
+      await (window as any).openwork.chats.delete(id);
+      if (activeSessionId === id) {
+        handleNewChat();
+      }
+      await loadSessions();
+    } catch {}
+  };
+
   const handleSendMessage = async (text: string) => {
     const userMsg: ChatMessageUI = {
       id: `usr_${Date.now()}`,
@@ -123,8 +186,20 @@ export const App: React.FC = () => {
       toolCalls: [],
     };
 
-    setMessages((prev) => [...prev, userMsg, assistantPlaceholder]);
+    const newMessages = [...messages, userMsg, assistantPlaceholder];
+    setMessages(newMessages);
     setStatus('Thinking');
+
+    // Ensure session exists or create it
+    let currentSessionId = activeSessionId;
+    if (!currentSessionId && (window as any).openwork?.chats) {
+      try {
+        const created = await (window as any).openwork.chats.create(text.slice(0, 35));
+        currentSessionId = created.id;
+        setActiveSessionId(created.id);
+        loadSessions();
+      } catch {}
+    }
 
     try {
       const history = messages.map((m) => ({
@@ -141,6 +216,14 @@ export const App: React.FC = () => {
           last.content = finalContent || last.content;
           copy[copy.length - 1] = last;
         }
+
+        // Persist final messages to disk
+        if (currentSessionId && (window as any).openwork?.chats) {
+          (window as any).openwork.chats.saveMessages(currentSessionId, copy).then(() => {
+            loadSessions();
+          });
+        }
+
         return copy;
       });
 
@@ -158,6 +241,11 @@ export const App: React.FC = () => {
         const last = { ...copy[copy.length - 1] };
         last.content = `Error: ${err.message || 'Execution failed.'}`;
         copy[copy.length - 1] = last;
+
+        if (currentSessionId && (window as any).openwork?.chats) {
+          (window as any).openwork.chats.saveMessages(currentSessionId, copy);
+        }
+
         return copy;
       });
     }
@@ -191,32 +279,47 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setActivityLog([]);
-    setStatus('Idle');
-    setCurrentTab('chat');
-  };
-
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
       {/* Left Sidebar */}
       <Sidebar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={(tab) => {
+          setCurrentTab(tab);
+          if (tab === 'settings') {
+            checkProviderState();
+          }
+        }}
         onNewChat={handleNewChat}
         isAgentMode={isAgentMode}
         onToggleMode={handleToggleMode}
         activeProvider={activeProvider}
         activeModel={activeModel}
         status={status}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onRenameSession={handleRenameSession}
+        onDeleteSession={handleDeleteSession}
       />
 
       {/* Main View Area */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         {currentTab === 'chat' && (
           <>
-            <ChatArea messages={messages} onConfirm={handleConfirmAction} />
+            <ChatArea
+              messages={messages}
+              status={status}
+              hasProviderKey={hasProviderKey}
+              hasSelectedModel={Boolean(activeModel)}
+              onNavigateTab={(tab) => {
+                setCurrentTab(tab);
+                if (tab === 'settings') {
+                  checkProviderState();
+                }
+              }}
+              onConfirm={handleConfirmAction}
+            />
             <InputBar
               onSendMessage={handleSendMessage}
               onStop={handleStop}
@@ -225,6 +328,9 @@ export const App: React.FC = () => {
               status={status}
               isPaused={isPaused}
               disabled={status === 'WaitingForConfirmation'}
+              hasProviderKey={hasProviderKey}
+              activeProviderName={activeProviderName}
+              onNavigateSettings={() => setCurrentTab('settings')}
             />
           </>
         )}

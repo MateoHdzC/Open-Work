@@ -1,7 +1,7 @@
 {
   "name": "openwork",
   "version": "1.0.0",
-  "description": "Autonomous Windows AI Desktop Agent & Computer Workspace Environment",
+  "description": "AI Desktop Agent for Windows",
   "type": "module",
   "main": "dist/main/index.js",
   "bin": {
@@ -52,12 +52,14 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
       "target": [
         "dir"
       ],
+      "icon": "assets/icon.ico",
       "signAndEditExecutable": false
     }
   }

@@ -15,6 +15,7 @@
   },
   "include": [
     "src/index.ts",
+    "src/chats/**/*",
     "src/main/**/*",
     "src/preload/**/*",
     "src/agent/**/*",

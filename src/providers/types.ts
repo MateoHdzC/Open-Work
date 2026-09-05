@@ -1,3 +1,17 @@
+export type ProviderConnectionStatus =
+  | 'Not Connected'
+  | 'Connecting'
+  | 'Connected'
+  | 'Invalid Key'
+  | 'Error';
+
+export interface ConnectionTestResult {
+  connected: boolean;
+  status: ProviderConnectionStatus;
+  message: string;
+  modelCount?: number;
+}
+
 export interface ModelCapability {
   tools: boolean;
   vision: boolean;

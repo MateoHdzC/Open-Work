@@ -10,6 +10,8 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  Trash2,
+  Zap,
 } from 'lucide-react';
 import { ProviderUI } from '../types';
 
@@ -32,6 +34,13 @@ export const SettingsView: React.FC = () => {
   const [discoveredModels, setDiscoveredModels] = useState<any[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    connected: boolean;
+    status: string;
+    message: string;
+    modelCount?: number;
+  } | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   const [appSettings, setAppSettings] = useState<any>({
     requireConfirmationForDestructive: true,
@@ -64,6 +73,7 @@ export const SettingsView: React.FC = () => {
     setSelectedProviderId(pId);
     setApiKeyInput('');
     setShowKey(false);
+    setTestResult(null);
     const p = providerData.providers.find((item) => item.id === pId);
     if (p) {
       setBaseUrlInput(p.baseUrl || '');
@@ -71,10 +81,66 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleToggleRevealKey = async () => {
+    if (showKey) {
+      setShowKey(false);
+      return;
+    }
+    if (!apiKeyInput && currentProvider?.hasKey) {
+      try {
+        const revealed = await (window as any).openwork.providers.revealKey(selectedProviderId);
+        if (revealed) {
+          setApiKeyInput(revealed);
+        }
+      } catch {}
+    }
+    setShowKey(true);
+  };
+
+  const handleDeleteKey = async () => {
+    if (confirm(`Remove stored API key for ${currentProvider?.name}?`)) {
+      await (window as any).openwork.providers.deleteKey(selectedProviderId);
+      setApiKeyInput('');
+      setShowKey(false);
+      setTestResult(null);
+      await loadAll();
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    setTestResult(null);
+    try {
+      if (apiKeyInput.trim()) {
+        await (window as any).openwork.providers.save(selectedProviderId, {
+          apiKey: apiKeyInput.trim(),
+          baseUrl: baseUrlInput.trim() || undefined,
+        });
+      }
+      const res = await (window as any).openwork.providers.testConnection(
+        selectedProviderId,
+        apiKeyInput.trim() || undefined
+      );
+      setTestResult(res);
+      if (res.connected) {
+        const models = await (window as any).openwork.providers.discoverModels(selectedProviderId);
+        if (models && models.length > 0) {
+          setDiscoveredModels(models);
+        }
+      }
+    } catch (err: any) {
+      setTestResult({
+        connected: false,
+        status: 'error',
+        message: err.message || 'Connection test failed',
+      });
+    }
+    setIsTestingConnection(false);
+  };
+
   const handleDiscover = async () => {
     setIsDiscovering(true);
     try {
-      // First save current key if typed
       if (apiKeyInput.trim()) {
         await (window as any).openwork.providers.save(selectedProviderId, {
           apiKey: apiKeyInput.trim(),
@@ -210,22 +276,43 @@ export const SettingsView: React.FC = () => {
                   {/* API Key */}
                   {selectedProviderId !== 'ollama' && (
                     <div>
-                      <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                        {currentProvider.name} API Key
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {currentProvider.name} API Key
+                        </label>
+                        {currentProvider.hasKey && (
+                          <button
+                            type="button"
+                            onClick={handleDeleteKey}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--status-danger)',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <Trash2 size={12} /> Clear Stored Key
+                          </button>
+                        )}
+                      </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <div style={{ position: 'relative', flex: 1 }}>
                           <input
                             type={showKey ? 'text' : 'password'}
-                            placeholder={currentProvider.hasKey ? '●●●●●●●●●●●●●●●● (Saved securely)' : 'Enter API Key...'}
+                            placeholder={currentProvider.hasKey ? (currentProvider.maskedKey || '●●●●●●●●●●●●●●●● (Saved securely)') : 'Enter API Key...'}
                             value={apiKeyInput}
                             onChange={(e) => setApiKeyInput(e.target.value)}
                             style={{ width: '100%', padding: '9px 36px 9px 12px', fontSize: '13px' }}
                           />
                           <button
                             type="button"
-                            onClick={() => setShowKey(!showKey)}
-                            style={{ position: 'absolute', right: '10px', top: '10px', color: 'var(--text-muted)' }}
+                            onClick={handleToggleRevealKey}
+                            title={showKey ? 'Hide Key' : 'Reveal Key'}
+                            style={{ position: 'absolute', right: '10px', top: '10px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
                           >
                             {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
@@ -248,27 +335,69 @@ export const SettingsView: React.FC = () => {
                     />
                   </div>
 
+                  {/* Connection Test Status Feedback Alert */}
+                  {testResult && (
+                    <div style={{
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      backgroundColor: testResult.connected ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                      border: testResult.connected ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                      color: testResult.connected ? 'var(--status-success)' : '#fca5a5',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}>
+                      {testResult.connected ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                      <span>{testResult.message}</span>
+                    </div>
+                  )}
+
                   {/* Discovery / Action Buttons */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px' }}>
-                    <button
-                      onClick={handleDiscover}
-                      disabled={isDiscovering}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '8px 14px',
-                        borderRadius: '6px',
-                        backgroundColor: 'var(--bg-main)',
-                        border: '1px solid var(--border)',
-                        color: 'var(--text-primary)',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      <RefreshCw size={14} className={isDiscovering ? 'custom-pulse' : ''} />
-                      Test Connection & Discover Models
-                    </button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={handleTestConnection}
+                        disabled={isTestingConnection}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px 14px',
+                          borderRadius: '6px',
+                          backgroundColor: 'var(--bg-main)',
+                          border: '1px solid var(--border)',
+                          color: 'var(--text-primary)',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Zap size={14} color="var(--accent)" className={isTestingConnection ? 'custom-pulse' : ''} />
+                        {isTestingConnection ? 'Testing...' : 'Test Connection'}
+                      </button>
+
+                      <button
+                        onClick={handleDiscover}
+                        disabled={isDiscovering}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px 14px',
+                          borderRadius: '6px',
+                          backgroundColor: 'var(--bg-main)',
+                          border: '1px solid var(--border)',
+                          color: 'var(--text-primary)',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <RefreshCw size={14} className={isDiscovering ? 'custom-pulse' : ''} />
+                        {isDiscovering ? 'Discovering...' : 'Discover Models'}
+                      </button>
+                    </div>
 
                     <button
                       onClick={() => handleSaveAndActivate()}
@@ -282,6 +411,7 @@ export const SettingsView: React.FC = () => {
                         color: '#ffffff',
                         fontSize: '13px',
                         fontWeight: 600,
+                        cursor: 'pointer',
                       }}
                     >
                       {saveSuccess ? <CheckCircle2 size={16} /> : null}
@@ -293,26 +423,46 @@ export const SettingsView: React.FC = () => {
                   {discoveredModels.length > 0 && (
                     <div style={{ marginTop: '12px', backgroundColor: 'var(--bg-main)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                       <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--text-secondary)' }}>
-                        Available Models Discovered dynamically ({discoveredModels.length}):
+                        Available Models Dynamically Discovered ({discoveredModels.length}):
                       </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-                        {discoveredModels.map((m) => (
-                          <button
-                            key={m.id}
-                            onClick={() => handleSaveAndActivate(m.id)}
-                            style={{
-                              padding: '5px 10px',
-                              borderRadius: '4px',
-                              backgroundColor: providerData.activeModelId === m.id ? 'var(--accent)' : 'var(--bg-card)',
-                              color: providerData.activeModelId === m.id ? '#fff' : 'var(--text-secondary)',
-                              border: '1px solid var(--border)',
-                              fontSize: '11px',
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {m.name || m.id} {m.capabilities?.vision ? '👁️' : ''}
-                          </button>
-                        ))}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+                        {discoveredModels.map((m) => {
+                          const isSelected = providerData.activeModelId === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => handleSaveAndActivate(m.id)}
+                              style={{
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                backgroundColor: isSelected ? 'var(--accent)' : 'var(--bg-card)',
+                                color: isSelected ? '#fff' : 'var(--text-secondary)',
+                                border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                fontSize: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <span style={{ fontFamily: 'monospace', fontWeight: isSelected ? 600 : 400 }}>
+                                {m.name || m.id}
+                              </span>
+                              {m.capabilities?.vision && (
+                                <span title="Vision capable" style={{ fontSize: '10px' }}>👁️</span>
+                              )}
+                              {m.capabilities?.functionCalling && (
+                                <span title="Tool / Function calling" style={{ fontSize: '10px' }}>⚙️</span>
+                              )}
+                              {m.capabilities?.reasoning && (
+                                <span title="Reasoning model" style={{ fontSize: '10px' }}>🧠</span>
+                              )}
+                              {isSelected && (
+                                <span style={{ fontSize: '10px', marginLeft: '2px', fontWeight: 700 }}>✓</span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

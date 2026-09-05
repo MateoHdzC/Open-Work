@@ -1,8 +1,17 @@
 export type NavigationTab = 'chat' | 'workspace' | 'activity' | 'memory' | 'settings';
 
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  providerId: string;
+  modelId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatMessageUI {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: string;
   toolCalls?: Array<{
@@ -22,7 +31,7 @@ export interface ActivityStepUI {
   toolName: string;
   parameters?: Record<string, any>;
   description: string;
-  status: 'Running' | 'Completed' | 'Waiting' | 'Paused' | 'Failed' | 'Cancelled';
+  status: 'Running' | 'Completed' | 'Failed' | 'Waiting' | 'Paused' | 'Cancelled';
   startedAt: string;
   finishedAt?: string;
   result?: any;
@@ -37,6 +46,7 @@ export interface ProviderUI {
   name: string;
   baseUrl: string;
   hasKey: boolean;
+  maskedKey?: string;
   selectedModel: string;
   defaultModels: string[];
 }

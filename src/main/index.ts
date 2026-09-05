@@ -13,6 +13,7 @@ import { SecurityFirewall } from '../security/firewall.js';
 import { VerificationEngine } from '../verification/engine.js';
 import { AgentEngine } from '../agent/engine.js';
 import { VoiceEngine } from '../voice/engine.js';
+import { ChatManager } from '../chats/manager.js';
 import { ProviderConfig } from '../providers/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -118,12 +119,21 @@ function decryptSecret(encrypted: string): string {
   return '';
 }
 
+function maskApiKey(key: string): string {
+  if (!key) return '';
+  if (key.length <= 8) return '••••••••';
+  const prefix = key.slice(0, 3);
+  const suffix = key.slice(-4);
+  return `${prefix}••••••••••••••••${suffix}`;
+}
+
 // System Singletons
 const settings = loadSettings();
 const tools = createDefaultToolRegistry();
 const gateway = new ModelGateway();
 const discovery = new ModelDiscoveryEngine();
 const memory = new MemoryStore();
+const chats = new ChatManager();
 const security = new SecurityFirewall({
   requireConfirmationForDestructive: settings.requireConfirmationForDestructive,
 });
@@ -211,13 +221,16 @@ const agent = new AgentEngine({
 agent.setMode(settings.isAgentMode);
 
 function createWindow() {
+  const iconPath = path.resolve(__dirname, '../../assets/icon.png');
+
   mainWindow = new BrowserWindow({
-    title: 'OpenWork - Autonomous Windows Desktop Agent',
+    title: 'OpenWork — Desktop Agent',
     width: 1280,
     height: 840,
     minWidth: 960,
     minHeight: 640,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: '#0c0d12',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -233,7 +246,6 @@ function createWindow() {
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    // Check if dist/renderer/index.html exists
     const prodHtml = path.join(__dirname, '../renderer/index.html');
     if (fs.existsSync(prodHtml)) {
       mainWindow.loadFile(prodHtml);
@@ -309,6 +321,31 @@ function setupIpcHandlers() {
     return { success: res };
   });
 
+  // Chat Sessions
+  ipcMain.handle('chats:list', () => {
+    return chats.listSessions();
+  });
+
+  ipcMain.handle('chats:create', (_, title?: string) => {
+    return chats.createSession(title, settings.activeProviderId, settings.activeModelId);
+  });
+
+  ipcMain.handle('chats:get', (_, id: string) => {
+    return chats.getSession(id);
+  });
+
+  ipcMain.handle('chats:save-messages', (_, id: string, messages: any[]) => {
+    return chats.saveMessages(id, messages);
+  });
+
+  ipcMain.handle('chats:rename', (_, id: string, newTitle: string) => {
+    return chats.renameSession(id, newTitle);
+  });
+
+  ipcMain.handle('chats:delete', (_, id: string) => {
+    return chats.deleteSession(id);
+  });
+
   // Workspace
   ipcMain.handle('workspace:select-dialog', async () => {
     if (!mainWindow) return null;
@@ -340,15 +377,55 @@ function setupIpcHandlers() {
     };
   });
 
+  ipcMain.handle('workspace:list-files', async (_, subPath?: string) => {
+    try {
+      const root = subPath
+        ? (path.isAbsolute(subPath) ? subPath : path.join(settings.workspaceRoot, subPath))
+        : settings.workspaceRoot;
+      if (!fs.existsSync(root)) return [];
+      const entries = fs.readdirSync(root, { withFileTypes: true });
+      return entries.map((e) => {
+        const full = path.join(root, e.name);
+        let size = 0;
+        let modified = '';
+        try {
+          const st = fs.statSync(full);
+          size = st.size;
+          modified = st.mtime.toISOString();
+        } catch {}
+        return {
+          name: e.name,
+          path: full,
+          isDirectory: e.isDirectory(),
+          size,
+          modified,
+        };
+      });
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle('workspace:open-file', async (_, filename: string) => {
+    const target = path.isAbsolute(filename) ? filename : path.join(settings.workspaceRoot, filename);
+    if (fs.existsSync(target)) {
+      await shell.openPath(target);
+      return { success: true };
+    }
+    return { success: false, error: 'File not found' };
+  });
+
   // Providers & API Keys
   ipcMain.handle('providers:list', () => {
-    const list = Object.values(providerCatalog).map(p => {
+    const list = Object.values(providerCatalog).map((p) => {
       const userP = settings.providers[p.id];
       const hasKey = Boolean(userP?.apiKeyEncrypted);
+      const rawKey = userP?.apiKeyEncrypted ? decryptSecret(userP.apiKeyEncrypted) : '';
       return {
         ...p,
         baseUrl: userP?.baseUrl || p.baseUrl,
         hasKey,
+        maskedKey: maskApiKey(rawKey),
         selectedModel: userP?.selectedModel || p.defaultModels[0],
       };
     });
@@ -357,6 +434,19 @@ function setupIpcHandlers() {
       activeModelId: settings.activeModelId,
       providers: list,
     };
+  });
+
+  ipcMain.handle('providers:reveal-key', (_, pId: string) => {
+    const stored = settings.providers[pId];
+    return stored?.apiKeyEncrypted ? decryptSecret(stored.apiKeyEncrypted) : '';
+  });
+
+  ipcMain.handle('providers:delete-key', (_, pId: string) => {
+    if (settings.providers[pId]) {
+      settings.providers[pId].apiKeyEncrypted = '';
+      saveSettings(settings);
+    }
+    return { success: true };
   });
 
   ipcMain.handle('providers:save', async (_, pId: string, config: { apiKey?: string; baseUrl?: string; selectedModel?: string }) => {
@@ -400,6 +490,17 @@ function setupIpcHandlers() {
       baseUrl: stored?.baseUrl || base.baseUrl,
     };
     return discovery.discoverModels(merged, key);
+  });
+
+  ipcMain.handle('providers:test-connection', async (_, pId: string, customKey?: string) => {
+    const base = providerCatalog[pId] || { id: pId, name: pId, baseUrl: '', defaultModels: [] };
+    const stored = settings.providers[pId];
+    const key = customKey !== undefined ? customKey : (stored?.apiKeyEncrypted ? decryptSecret(stored.apiKeyEncrypted) : '');
+    const merged: ProviderConfig = {
+      ...base,
+      baseUrl: stored?.baseUrl || base.baseUrl,
+    };
+    return gateway.testConnection(merged, key);
   });
 
   // Memory

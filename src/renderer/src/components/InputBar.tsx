@@ -9,6 +9,9 @@ interface InputBarProps {
   status: string;
   isPaused: boolean;
   disabled: boolean;
+  hasProviderKey?: boolean;
+  activeProviderName?: string;
+  onNavigateSettings?: () => void;
 }
 
 export const InputBar: React.FC<InputBarProps> = ({
@@ -19,6 +22,9 @@ export const InputBar: React.FC<InputBarProps> = ({
   status,
   isPaused,
   disabled,
+  hasProviderKey = true,
+  activeProviderName,
+  onNavigateSettings,
 }) => {
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -94,6 +100,39 @@ export const InputBar: React.FC<InputBarProps> = ({
       flexDirection: 'column',
       gap: '8px',
     }}>
+      {/* Warning banner when active provider has no key */}
+      {!hasProviderKey && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          backgroundColor: 'rgba(239, 68, 68, 0.12)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: '#fca5a5',
+        }}>
+          <span>No API Key configured for <strong>{activeProviderName || 'selected provider'}</strong>. Connect your key to interact with models.</span>
+          {onNavigateSettings && (
+            <button
+              onClick={onNavigateSettings}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '12px',
+                textDecoration: 'underline',
+              }}
+            >
+              Configure in Settings →
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Active working controls bar (when model/tools are running) */}
       {isWorking && (
         <div style={{
