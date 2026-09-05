@@ -5,5 +5,5 @@ export * from './providers/gateway.js';
 export * from './providers/discovery.js';
 export * from './memory/store.js';
 export * from './voice/engine.js';
-export * from './openkey/integration.js';
-export * from './core/server.js';
+export * from './security/firewall.js';
+export * from './verification/engine.js';
