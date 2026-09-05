@@ -14,7 +14,8 @@
     "build": "npm run build:renderer && npm run build:node",
     "start": "electron .",
     "test": "vitest run",
-    "package:win": "npm run build && electron-builder --win --dir"
+    "clean:win": "powershell -NoProfile -Command \"Stop-Process -Name OpenWork -Force -ErrorAction SilentlyContinue; if (Test-Path release/win-unpacked) { Remove-Item -Recurse -Force release/win-unpacked -ErrorAction SilentlyContinue }\"",
+    "package:win": "npm run clean:win && npm run build && electron-builder --win --dir"
   },
   "keywords": [
     "ai",

@@ -34,6 +34,16 @@ This document provides resolutions for common issues when installing, running, a
   npm install
   ```
 
+### Issue: `remove ...\OpenWork.exe: Acceso denegado` / `Invalid file descriptor to ICU data`
+- **Cause**: An earlier instance of `OpenWork.exe` is still running or hung in memory (often keeping an error dialog open in the background), which locks the binary on Windows. When `electron-builder` tries to overwrite it, access is denied and the destination directory becomes partially extracted/corrupted.
+- **Solution**: Terminate any lingering instances and clean the release folder:
+  ```powershell
+  Stop-Process -Name OpenWork -Force -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force release/win-unpacked -ErrorAction SilentlyContinue
+  npm run package:win
+  ```
+  *(The `npm run package:win` script now automatically runs this cleanup step).*
+
 ---
 
 ## 2. Windows Computer Control & PowerShell Issues
