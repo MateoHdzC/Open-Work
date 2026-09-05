@@ -20,7 +20,7 @@ Open PowerShell or Windows Terminal and clone the repository:
 
 ```powershell
 git clone https://github.com/MateoHdzC/Open-work.git
-cd openwork
+cd Open-work
 ```
 
 ---

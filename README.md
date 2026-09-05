@@ -57,7 +57,7 @@ USER ➔ OPENWORK ➔ PROVIDER API ➔ AI MODEL ➔ OPENWORK ➔ WINDOWS TOOLS �
 ### 1. Clone and Install
 ```powershell
 git clone https://github.com/MateoHdzC/Open-work.git
-cd openwork
+cd Open-work
 npm install
 ```
 

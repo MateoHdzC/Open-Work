@@ -20,6 +20,20 @@ This document provides resolutions for common issues when installing, running, a
   npm run build:renderer
   ```
 
+### Issue: `cd openwork` fails (`ItemNotFoundException`) and `npm install` throws `ENOENT: no such file or directory, open '...\package.json'`
+- **Cause**: By default, `git clone https://github.com/MateoHdzC/Open-work.git` creates a directory named `Open-work` (with a hyphen and capitalization). Attempting to run `cd openwork` fails, leaving the terminal in the parent directory where no `package.json` exists.
+- **Solution**: Navigate into the exact folder created by Git:
+  ```powershell
+  cd Open-work
+  npm install
+  ```
+  Or clone into `openwork` explicitly:
+  ```powershell
+  git clone https://github.com/MateoHdzC/Open-work.git openwork
+  cd openwork
+  npm install
+  ```
+
 ---
 
 ## 2. Windows Computer Control & PowerShell Issues
