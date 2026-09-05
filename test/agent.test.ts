@@ -3,6 +3,8 @@ import { AgentEngine } from '../src/agent/engine.js';
 import { createDefaultToolRegistry } from '../src/tools/index.js';
 import { ModelGateway } from '../src/providers/gateway.js';
 import { MemoryStore } from '../src/memory/store.js';
+import { SecurityFirewall } from '../src/security/firewall.js';
+import { VerificationEngine } from '../src/verification/engine.js';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -10,11 +12,15 @@ describe('AgentEngine State and Controls', () => {
   const tools = createDefaultToolRegistry();
   const gateway = new ModelGateway();
   const memory = new MemoryStore(path.join(os.tmpdir(), 'agent_test_' + Date.now() + '.sqlite'));
+  const security = new SecurityFirewall();
+  const verification = new VerificationEngine();
 
   const engine = new AgentEngine({
     tools,
     gateway,
     memory,
+    security,
+    verification,
     workspaceRoot: process.cwd(),
     provider: {
       id: 'openai',
@@ -35,6 +41,7 @@ describe('AgentEngine State and Controls', () => {
   it('should pause and resume execution', () => {
     engine.pause();
     expect((engine as any).state.isPaused).toBe(true);
+    expect((engine as any).state.status).toBe('Paused');
     engine.resume();
     expect((engine as any).state.isPaused).toBe(false);
   });

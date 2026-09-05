@@ -1,13 +1,17 @@
 import { ToolRegistry } from '../tools/registry.js';
 import { ModelGateway } from '../providers/gateway.js';
 import { MemoryStore } from '../memory/store.js';
+import { SecurityFirewall } from '../security/firewall.js';
+import { VerificationEngine } from '../verification/engine.js';
 import { ChatMessage, ProviderConfig } from '../providers/types.js';
-import { AgentActivityStep, AgentExecutionState } from './types.js';
+import { AgentActivityStep, AgentExecutionState, AgentState } from './types.js';
 
 export interface AgentEngineConfig {
   tools: ToolRegistry;
   gateway: ModelGateway;
   memory: MemoryStore;
+  security: SecurityFirewall;
+  verification: VerificationEngine;
   workspaceRoot: string;
   provider: ProviderConfig;
   modelId: string;
@@ -15,20 +19,24 @@ export interface AgentEngineConfig {
   onActivity?: (step: AgentActivityStep) => void;
   onStateChange?: (state: AgentExecutionState) => void;
   onToken?: (token: string) => void;
-  onConfirmationRequired?: (step: AgentActivityStep, resolve: (confirmed: boolean) => void) => void;
+  onConfirmationRequired?: (
+    step: AgentActivityStep,
+    confirm: (confirmed: boolean) => void
+  ) => void;
 }
 
 export class AgentEngine {
   private config: AgentEngineConfig;
   private state: AgentExecutionState;
   private abortController: AbortController | null = null;
-  private maxIterations = 12;
+  private maxIterations = 15;
+  private pausePromiseResolve: (() => void) | null = null;
 
   constructor(config: AgentEngineConfig) {
     this.config = config;
     this.state = {
       isAgentMode: true,
-      isActive: false,
+      status: 'Idle',
       isPaused: false,
       activityLog: [],
       workspaceRoot: config.workspaceRoot,
@@ -47,21 +55,31 @@ export class AgentEngine {
     this.emitState();
   }
 
+  public setConfig(update: Partial<AgentEngineConfig>): void {
+    this.config = { ...this.config, ...update };
+  }
+
   public stop(): void {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
-    this.state.isActive = false;
+    if (this.pausePromiseResolve) {
+      this.pausePromiseResolve();
+      this.pausePromiseResolve = null;
+    }
     this.state.isPaused = false;
+    this.state.status = 'Cancelled';
     if (this.state.currentStep && this.state.currentStep.status === 'Running') {
       this.state.currentStep.status = 'Cancelled';
+      this.state.currentStep.finishedAt = new Date().toISOString();
     }
     this.emitState();
   }
 
   public pause(): void {
     this.state.isPaused = true;
+    this.state.status = 'Paused';
     if (this.state.currentStep && this.state.currentStep.status === 'Running') {
       this.state.currentStep.status = 'Paused';
     }
@@ -70,10 +88,19 @@ export class AgentEngine {
 
   public resume(): void {
     this.state.isPaused = false;
+    this.state.status = 'Running';
     if (this.state.currentStep && this.state.currentStep.status === 'Paused') {
       this.state.currentStep.status = 'Running';
     }
+    if (this.pausePromiseResolve) {
+      this.pausePromiseResolve();
+      this.pausePromiseResolve = null;
+    }
     this.emitState();
+  }
+
+  public confirmAction(id: string, confirmed: boolean): boolean {
+    return this.config.security.answerConfirmation(id, confirmed);
   }
 
   private emitState(): void {
@@ -91,10 +118,35 @@ export class AgentEngine {
     this.emitState();
   }
 
+  private async waitIfPaused(): Promise<void> {
+    if (this.state.isPaused) {
+      await new Promise<void>(resolve => {
+        this.pausePromiseResolve = resolve;
+      });
+    }
+  }
+
   public async runConversation(prompt: string, history: ChatMessage[] = []): Promise<string> {
-    this.state.isActive = true;
+    // Check natural memory commands first
+    const memoryAck = this.config.memory.handleNaturalMemoryCommand(prompt, this.state.workspaceRoot);
+    if (memoryAck) {
+      this.state.status = 'Completed';
+      this.emitState();
+      return memoryAck;
+    }
+
+    this.state.status = 'Thinking';
     this.abortController = new AbortController();
     this.emitState();
+
+    // Check if resuming from previous working memory
+    let resumedContext = '';
+    if (prompt.toLowerCase().includes('continúa donde nos quedamos') || prompt.toLowerCase().includes('resume where we left')) {
+      const lastWork = this.config.memory.getWorkingMemory(this.state.workspaceRoot);
+      if (lastWork) {
+        resumedContext = `\n[Resumed Task State]: Previous task was "${lastWork.task}". State: "${lastWork.state}". Continue from here.\n`;
+      }
+    }
 
     const relevantMemories = this.config.memory.getRelevantContext(prompt, this.state.workspaceRoot);
     const memoryPrompt = relevantMemories.length > 0
@@ -103,11 +155,12 @@ export class AgentEngine {
 
     const systemPrompt: ChatMessage = {
       role: 'system',
-      content: 'You are OpenWork, an autonomous Windows AI desktop agent. ' +
-        'You have full direct access to Windows applications, mouse/keyboard simulation, files, terminal, browser, and verification tools. ' +
-        'When asked to perform tasks (e.g. open apps, run tests, edit files, check websites, inspect windows), call the appropriate tools. ' +
-        'Always verify real outcomes. If an action fails, inspect the error and adapt. ' +
-        'Active Workspace: ' + this.state.workspaceRoot + memoryPrompt,
+      content:
+        'You are OpenWork, an autonomous Windows desktop agent environment. ' +
+        'IMPORTANT: You are NOT an AI model created by OpenWork. OpenWork provides you with real Windows execution tools, files, terminal, browser, and hardware controls. ' +
+        'The reality of Windows is the source of truth. Always call tools to verify actions. ' +
+        'Never pretend a file was created or an app was opened without executing and verifying it. ' +
+        'Active Workspace: ' + this.state.workspaceRoot + memoryPrompt + resumedContext,
     };
 
     const messages: ChatMessage[] = [
@@ -119,121 +172,164 @@ export class AgentEngine {
     let currentIteration = 0;
     let finalAssistantResponse = '';
 
-    while (currentIteration < this.maxIterations && this.state.isActive) {
-      currentIteration++;
-
-      while (this.state.isPaused) {
-        await new Promise(r => setTimeout(r, 400));
-        if (!this.state.isActive) return 'Execution stopped by user.';
-      }
-
-      const response = await this.config.gateway.callModel({
-        provider: this.config.provider,
-        modelId: this.config.modelId,
-        messages,
-        tools: this.state.isAgentMode ? this.config.tools : undefined,
-        apiKey: this.config.apiKey,
-        onToken: this.config.onToken,
-      });
-
-      if (!response.toolCalls || response.toolCalls.length === 0 || !this.state.isAgentMode) {
-        finalAssistantResponse = response.content;
-        break;
-      }
-
-      messages.push({
-        role: 'assistant',
-        content: response.content,
-        toolCalls: response.toolCalls.map(tc => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: JSON.stringify(tc.arguments),
-        })),
-      });
-
-      for (const tc of response.toolCalls) {
-        if (!this.state.isActive) break;
-
-        const toolDef = this.config.tools.get(tc.name);
-        const stepId = 'step_' + Math.random().toString(36).substring(2, 9);
-        const step: AgentActivityStep = {
-          id: stepId,
-          toolName: tc.name,
-          description: 'Executing ' + tc.name + ' with args: ' + JSON.stringify(tc.arguments),
-          status: 'Running',
-          startedAt: new Date().toISOString(),
-          requiresConfirmation: toolDef?.isDestructive,
-        };
-
-        this.emitActivity(step);
-
-        if (toolDef?.isDestructive) {
-          step.status = 'Waiting';
+    try {
+      while (currentIteration < this.maxIterations) {
+        await this.waitIfPaused();
+        if (this.abortController.signal.aborted) {
+          this.state.status = 'Cancelled';
           this.emitState();
-          const confirmed = await this.requestUserConfirmation(step);
-          if (!confirmed) {
-            step.status = 'Cancelled';
-            step.error = 'Action denied by user';
-            this.emitState();
-            messages.push({
-              role: 'tool',
-              toolCallId: tc.id,
-              content: JSON.stringify({ success: false, error: 'User denied confirmation for ' + tc.name }),
-            });
-            continue;
-          }
-          step.status = 'Running';
-          this.emitState();
+          return 'Execution cancelled by user.';
         }
 
-        let result: any;
-        if (!toolDef) {
-          result = { success: false, error: 'Tool not found: ' + tc.name };
-          step.status = 'Failed';
-          step.error = result.error;
-        } else {
-          try {
-            result = await toolDef.execute(tc.arguments, { workspaceRoot: this.state.workspaceRoot });
-            step.status = result.success ? 'Completed' : 'Failed';
-            step.result = result.data;
-            step.error = result.error;
-
-            if (tc.name === 'open_application' && result.data?.app) {
-              this.state.lastVerifiedProcess = result.data.app;
-            }
-            if (tc.name === 'write_file' && tc.arguments?.path) {
-              this.state.lastModifiedFiles.push(tc.arguments.path);
-            }
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            result = { success: false, error: msg };
-            step.status = 'Failed';
-            step.error = msg;
-          }
-        }
-
-        step.finishedAt = new Date().toISOString();
+        currentIteration++;
+        this.state.status = 'Thinking';
         this.emitState();
 
-        messages.push({
-          role: 'tool',
-          toolCallId: tc.id,
-          content: JSON.stringify(result),
+        const modelResponse = await this.config.gateway.callModel({
+          provider: this.config.provider,
+          modelId: this.config.modelId,
+          apiKey: this.config.apiKey,
+          messages,
+          tools: this.state.isAgentMode ? this.config.tools : undefined,
+          onToken: (token) => {
+            if (this.config.onToken) this.config.onToken(token);
+          },
         });
+
+        if (modelResponse.content) {
+          finalAssistantResponse = modelResponse.content;
+        }
+
+        // If no tool calls, or in CHAT mode, we are done
+        if (!this.state.isAgentMode || !modelResponse.toolCalls || modelResponse.toolCalls.length === 0) {
+          this.state.status = 'Completed';
+          this.emitState();
+          // Update working memory
+          this.config.memory.setWorkingMemory(prompt, finalAssistantResponse.slice(0, 200), this.state.workspaceRoot);
+          return finalAssistantResponse;
+        }
+
+        // Add assistant's tool call message
+        messages.push({
+          role: 'assistant',
+          content: modelResponse.content || '',
+          toolCalls: modelResponse.toolCalls,
+        });
+
+        // Execute tool calls
+        for (const tc of modelResponse.toolCalls) {
+          await this.waitIfPaused();
+          if (this.abortController.signal.aborted) {
+            this.state.status = 'Cancelled';
+            this.emitState();
+            return 'Execution cancelled by user.';
+          }
+
+          let parsedArgs: Record<string, any> = {};
+          try {
+            parsedArgs = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+          } catch {
+            parsedArgs = {};
+          }
+
+          const step: AgentActivityStep = {
+            id: tc.id,
+            toolName: tc.name,
+            parameters: parsedArgs,
+            description: `Calling ${tc.name}`,
+            status: 'Running',
+            startedAt: new Date().toISOString(),
+          };
+
+          // Check security firewall
+          if (this.config.security.needsConfirmation(tc.name, parsedArgs)) {
+            step.requiresConfirmation = true;
+            step.status = 'Waiting';
+            this.state.status = 'WaitingForConfirmation';
+            this.emitActivity(step);
+
+            const userApproved = await new Promise<boolean>((resolve) => {
+              this.config.security.requestConfirmation(tc.name, parsedArgs, resolve);
+              if (this.config.onConfirmationRequired) {
+                this.config.onConfirmationRequired(step, resolve);
+              }
+            });
+
+            if (!userApproved) {
+              step.status = 'Cancelled';
+              step.error = 'Action rejected by user confirmation policy.';
+              step.finishedAt = new Date().toISOString();
+              this.emitActivity(step);
+
+              messages.push({
+                role: 'tool',
+                toolCallId: tc.id,
+                content: JSON.stringify({
+                  success: false,
+                  error: 'Action cancelled: User denied permission.',
+                }),
+              });
+              continue;
+            }
+          }
+
+          this.state.status = 'Running';
+          step.status = 'Running';
+          this.emitActivity(step);
+
+          const tool = this.config.tools.get(tc.name);
+          let toolResult: any;
+
+          if (!tool) {
+            toolResult = { success: false, error: `Tool "${tc.name}" is not registered in OpenWork.` };
+            step.status = 'Failed';
+            step.error = toolResult.error;
+          } else {
+            try {
+              toolResult = await tool.execute(parsedArgs, { workspaceRoot: this.state.workspaceRoot });
+              step.status = toolResult.success ? 'Completed' : 'Failed';
+              step.result = toolResult.data;
+              step.error = toolResult.error;
+
+              // Run empirical verification on Windows
+              if (tc.name === 'open_application' && parsedArgs.appName) {
+                const check = await this.config.verification.verifyApplicationRunning(parsedArgs.appName);
+                step.verified = check.verified;
+                step.verificationReality = check.reality;
+              } else if (tc.name === 'write_file' && parsedArgs.path) {
+                const check = this.config.verification.verifyFileExists(parsedArgs.path, this.state.workspaceRoot);
+                step.verified = check.verified;
+                step.verificationReality = check.reality;
+                this.state.lastModifiedFiles.push(parsedArgs.path);
+              } else if (tc.name === 'run_tests') {
+                step.verified = toolResult.success;
+                step.verificationReality = toolResult.success ? 'Verified: Tests passed.' : 'Verified: Tests failed.';
+              }
+            } catch (err: any) {
+              toolResult = { success: false, error: err.message || String(err) };
+              step.status = 'Failed';
+              step.error = toolResult.error;
+            }
+          }
+
+          step.finishedAt = new Date().toISOString();
+          this.emitActivity(step);
+
+          messages.push({
+            role: 'tool',
+            toolCallId: tc.id,
+            content: JSON.stringify(toolResult),
+          });
+        }
       }
-    }
 
-    this.state.isActive = false;
-    this.emitState();
-    return finalAssistantResponse;
-  }
-
-  private async requestUserConfirmation(step: AgentActivityStep): Promise<boolean> {
-    if (this.config.onConfirmationRequired) {
-      return new Promise((resolve) => {
-        this.config.onConfirmationRequired!(step, resolve);
-      });
+      this.state.status = 'Completed';
+      this.emitState();
+      return finalAssistantResponse;
+    } catch (err: any) {
+      this.state.status = 'Failed';
+      this.emitState();
+      throw err;
     }
-    return true;
   }
 }

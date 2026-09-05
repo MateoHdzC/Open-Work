@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/agent/**/*",
+    "src/providers/**/*",
+    "src/tools/**/*",
+    "src/memory/**/*",
+    "src/security/**/*",
+    "src/verification/**/*",
+    "src/voice/**/*"
+  ],
+  "exclude": [
+    "src/renderer/**/*",
+    "node_modules",
+    "dist"
+  ]
+}

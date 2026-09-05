@@ -1,8 +1,25 @@
-export type AgentStepStatus = 'Running' | 'Completed' | 'Waiting' | 'Paused' | 'Failed' | 'Cancelled';
+export type AgentState =
+  | 'Idle'
+  | 'Thinking'
+  | 'Running'
+  | 'WaitingForConfirmation'
+  | 'Paused'
+  | 'Completed'
+  | 'Failed'
+  | 'Cancelled';
+
+export type AgentStepStatus =
+  | 'Running'
+  | 'Completed'
+  | 'Waiting'
+  | 'Paused'
+  | 'Failed'
+  | 'Cancelled';
 
 export interface AgentActivityStep {
   id: string;
   toolName: string;
+  parameters?: Record<string, any>;
   description: string;
   status: AgentStepStatus;
   startedAt: string;
@@ -10,11 +27,13 @@ export interface AgentActivityStep {
   result?: any;
   error?: string;
   requiresConfirmation?: boolean;
+  verified?: boolean;
+  verificationReality?: string;
 }
 
 export interface AgentExecutionState {
   isAgentMode: boolean;
-  isActive: boolean;
+  status: AgentState;
   isPaused: boolean;
   currentStep?: AgentActivityStep;
   activityLog: AgentActivityStep[];

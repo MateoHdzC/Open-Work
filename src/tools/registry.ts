@@ -7,7 +7,7 @@ export interface ToolParamSchema {
 export interface ToolDefinition {
   name: string;
   description: string;
-  category: 'system' | 'computer' | 'files' | 'terminal' | 'browser' | 'development';
+  category: 'system' | 'computer' | 'files' | 'terminal' | 'browser' | 'development' | 'applications';
   parameters: Record<string, ToolParamSchema>;
   isDestructive?: boolean;
   execute: (args: any, context?: any) => Promise<{ success: boolean; data?: any; error?: string }>;

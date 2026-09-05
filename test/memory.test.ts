@@ -13,7 +13,7 @@ describe('MemoryStore', () => {
 
   it('should save and list memories', () => {
     const saved = memory.saveMemory({
-      category: 'preference',
+      category: 'permanent',
       topicKey: 'language',
       content: 'User prefers TypeScript over JavaScript',
     });
@@ -21,25 +21,25 @@ describe('MemoryStore', () => {
     expect(saved).toHaveProperty('id');
     expect(saved.content).toBe('User prefers TypeScript over JavaScript');
 
-    const list = memory.listMemories('preference');
+    const list = memory.listMemories('permanent');
     expect(list.length).toBe(1);
     expect(list[0].topicKey).toBe('language');
   });
 
   it('should update existing memory with same topic key', () => {
     memory.saveMemory({
-      category: 'preference',
+      category: 'permanent',
       topicKey: 'accentColor',
       content: 'Blue',
     });
 
     const updated = memory.saveMemory({
-      category: 'preference',
+      category: 'permanent',
       topicKey: 'accentColor',
       content: 'Cyan',
     });
 
-    const list = memory.listMemories('preference');
+    const list = memory.listMemories('permanent');
     expect(list.length).toBe(1);
     expect(list[0].content).toBe('Cyan');
   });
@@ -58,7 +58,7 @@ describe('MemoryStore', () => {
 
   it('should delete memory by id', () => {
     const saved = memory.saveMemory({
-      category: 'instruction',
+      category: 'permanent',
       topicKey: 'temp',
       content: 'Temporary instruction',
     });
@@ -66,5 +66,14 @@ describe('MemoryStore', () => {
     const deleted = memory.deleteMemory(saved.id);
     expect(deleted).toBe(true);
     expect(memory.listMemories().length).toBe(0);
+  });
+
+  it('should handle natural memory commands', () => {
+    const ack = memory.handleNaturalMemoryCommand('Recuerda que uso TypeScript');
+    expect(ack).toContain('Memoria guardada');
+
+    const list = memory.listMemories('permanent');
+    expect(list.length).toBe(1);
+    expect(list[0].content).toBe('uso TypeScript');
   });
 });
