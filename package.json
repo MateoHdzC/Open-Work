@@ -4,6 +4,9 @@
   "description": "Autonomous Windows AI Desktop Agent & Computer Workspace Environment",
   "type": "module",
   "main": "dist/main/index.js",
+  "bin": {
+    "openwork": "bin/openwork.js"
+  },
   "scripts": {
     "dev:renderer": "vite",
     "build:renderer": "vite build",
@@ -52,13 +55,9 @@
     ],
     "win": {
       "target": [
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "OpenWork-Setup.${ext}"
+        "dir"
+      ],
+      "signAndEditExecutable": false
     }
   }
 }
