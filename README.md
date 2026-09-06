@@ -19,6 +19,9 @@ USER ➔ OPENWORK ➔ PROVIDER API ➔ AI MODEL ➔ OPENWORK ➔ WINDOWS TOOLS �
 
 ## 🌟 Key Features
 
+- **Persistent Multi-Session Chat History**: Complete chat session manager in the sidebar with auto-titling from initial queries, inline renaming, switching between past conversations, and deletion. All chats, messages, and tool call histories persist locally in `~/.openwork/chats.json`.
+- **Interactive Workspace File Explorer**: Browse real filesystem files and folders directly inside the Workspace tab with breadcrumb navigation, file sizes, modification timestamps, and one-click opening in your Windows default code editor or application.
+- **Provider Security & Live Diagnostics**: Masked key display (`sk-••••••••1234`), reveal toggle, secure deletion, and one-click connection diagnostics (`Test Connection`) measuring latency and validating model access.
 - **Empirical Reality Verification**: OpenWork never blindly trusts the model. When a model claims an application was launched, a file was modified, or tests passed, the Verification Engine checks the actual operating system state (process tree, window handles, filesystem mutation, exit codes).
 - **Two Exclusive Modes**:
   - **CHAT Mode**: Conversational dialogue, conceptual architecture analysis, writing, and explanations without system tool execution.
@@ -70,11 +73,11 @@ npm run build
 npm start
 ```
 
-### 3. Generate Windows Installer (`OpenWork-Setup.exe`)
+### 3. Package Native Windows Executable (`OpenWork.exe`)
 ```powershell
 npm run package:win
 ```
-The installer will be generated in `release/OpenWork-Setup.exe`.
+The application binary and resources are created cleanly in `release/win-unpacked/OpenWork.exe` with multi-resolution Windows icons.
 
 ---
 
